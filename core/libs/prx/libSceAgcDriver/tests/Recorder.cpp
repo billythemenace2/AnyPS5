@@ -5770,6 +5770,49 @@ void multisampleGuestAccessTests(const Device& device, Recorder& recorder) {
         previous = view;
     }
     clearTargets();
+    if (void* watched = AllocateWatched(bytes, 65536); watched != nullptr) {
+        const auto watchedAddress = reinterpret_cast<std::uint64_t>(watched);
+        {
+            GuestAllocations::Mutation mutation;
+            mutation.Add(watched, bytes, true, true, true);
+        }
+        struct Release {
+            const Context& context;
+            void* block;
+            std::size_t bytes;
+            ~Release() {
+                ClearMultisampleTargets(context.device);
+                {
+                    GuestAllocations::Mutation mutation;
+                    mutation.Remove(block);
+                }
+                ReleaseWatched(block, bytes);
+            }
+        } release{context, watched, bytes};
+        target.address = watchedAddress;
+        target.surfaceAddress = watchedAddress;
+        target.extent = {side, side};
+        target.surfaceExtent = target.extent;
+        target.samples = 4;
+        target.tileMode = ColorTileMode::RenderTarget;
+        const auto use = [&] {
+            std::lock_guard gpu(GpuMutex());
+            Require(MultisampleTargetView(context, target) != VK_NULL_HANDLE, "the watched multisampled target has no view");
+            recorder.Submit();
+            device.WaitQueue();
+            recorder.Sync();
+        };
+        use();
+        refused([&] { AgcDriver::GuestMemory::Read(watchedAddress + 256u, texels); }, "a CPU read", "a CPU read of an unwritten watched target");
+        std::memset(static_cast<std::byte*>(watched) + 4096u, 0x5a, 256u);
+        AgcDriver::GuestMemory::Read(watchedAddress + 4096u, texels);
+        Require(texels[0] == std::byte{0x5a}, "a CPU read after a CPU store over a multisampled target's memory did not return the stored bytes");
+        AgcDriver::GuestMemory::Read(watchedAddress + 256u, texels);
+        use();
+        refused([&] { AgcDriver::GuestMemory::Read(watchedAddress + 256u, texels); }, "a CPU read", "a CPU read of a target recreated over reused memory");
+    } else {
+        std::cout << "write watching unavailable: a multisampled target over reused memory not tested\n";
+    }
     std::cout << "Multisampled target guest access tests passed\n";
 }
 
