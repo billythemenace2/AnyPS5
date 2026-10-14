@@ -244,17 +244,6 @@ void retireUnmapped(std::uintptr_t address, std::size_t bytes) {
     anyGuarded().store(!guarded().empty(), std::memory_order_release);
 }
 
-void retireWritten(std::uint64_t address, std::size_t bytes) {
-    if (!anyGuarded().load(std::memory_order_acquire)) return;
-    std::unique_lock lock(guardedMutex());
-    std::erase_if(guarded(), [&](const auto& range) {
-        if (address >= range.address + range.bytes || range.address >= address + bytes) return false;
-        range.active->store(false, std::memory_order_release);
-        return true;
-    });
-    anyGuarded().store(!guarded().empty(), std::memory_order_release);
-}
-
 void guard(const Context& context, const ColorTarget& target, const std::shared_ptr<std::atomic<bool>>& active) {
     auto bytes = std::max<std::uint64_t>(target.bytes * target.samples, static_cast<std::uint64_t>(target.extent.width) * target.extent.height * target.elementBytes * target.samples);
     if (target.tileMode == ColorTileMode::RenderTarget && std::has_single_bit(target.elementBytes) && std::has_single_bit(target.samples)) {
@@ -277,7 +266,6 @@ void guard(const Context& context, const ColorTarget& target, const std::shared_
     static std::once_flag installed;
     std::call_once(installed, [] {
         GuestMemory::SetReadGuard(&guardReads);
-        GuestMemory::SetWriteObserver(&retireWritten);
     });
     GuestAllocations::GuestAllocationsSetUnmapObserver_nid_postfix(&retireUnmapped);
 }

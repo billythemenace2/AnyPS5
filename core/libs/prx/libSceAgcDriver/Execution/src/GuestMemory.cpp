@@ -1400,18 +1400,7 @@ std::uint64_t storeOwn(std::uint64_t address, std::size_t bytes, const std::func
     return stampStored(tracker, stored);
 }
 
-std::atomic<void (*)(std::uint64_t, std::size_t)> writeObserver{nullptr};
-
-void SetWriteObserver(void (*observer)(std::uint64_t address, std::size_t bytes)) {
-    writeObserver.store(observer, std::memory_order_release);
-}
-
-void noteDriverWrite(std::uint64_t address, std::size_t bytes) {
-    if (const auto observer = writeObserver.load(std::memory_order_acquire); observer != nullptr && bytes != 0) observer(address, bytes);
-}
-
 std::uint64_t StoreOwnBytes(std::uint64_t address, std::size_t bytes, const std::function<void()>& store) {
-    noteDriverWrite(address, bytes);
     return storeOwn(address, bytes, [&] {
         store();
         return std::pair<std::uint64_t, std::uint64_t>{address, address + bytes};
@@ -1428,7 +1417,6 @@ std::uint64_t StoreOwnBytes(std::uint64_t address, std::span<const std::byte> so
 }
 
 std::uint64_t MarkWritten(std::uint64_t address, std::size_t bytes) {
-    noteDriverWrite(address, bytes);
     auto& tracker = Tracker();
     const auto lock = lockTracker(tracker);
     tracker.initialize();
@@ -2092,7 +2080,6 @@ Compare CopyMapped(std::uint64_t address, std::span<std::byte> out) {
 }
 
 void WriteChangedCommitted(std::uint64_t address, std::span<const std::byte> current, std::span<const std::byte> original) {
-    noteDriverWrite(address, current.size());
     require(current.size() == original.size(), "write-back snapshot sizes differ");
     if (Accessible(reinterpret_cast<const void*>(address), current.size(), true)) {
         WriteChanged(address, current, original);
@@ -2106,7 +2093,6 @@ void WriteChangedCommitted(std::uint64_t address, std::span<const std::byte> cur
 }
 
 void WriteChanged(std::uint64_t address, std::span<const std::byte> current, std::span<const std::byte> original) {
-    noteDriverWrite(address, current.size());
     require(current.size() == original.size(), "write-back snapshot sizes differ");
     if (current.empty()) return;
     // A store: the hook sync it makes orders this write after a pending GPU write, whatever a read
@@ -2145,7 +2131,6 @@ void WriteChanged(std::uint64_t address, std::span<const std::byte> current, std
 }
 
 void Write(std::uint64_t address, std::span<const std::byte> source, std::size_t alignment) {
-    noteDriverWrite(address, source.size());
     if (source.empty()) return;
     // A store, as in WriteChanged.
     const ReadSiteScope site(ReadSite::Store);
