@@ -204,6 +204,7 @@ struct GuardedRange {
     std::uint64_t bytes;
     std::uint32_t samples;
     std::shared_ptr<std::atomic<bool>> active;
+    std::uint64_t generation;
 };
 
 class PrimedSharedMutex : public std::shared_mutex {
@@ -254,8 +255,13 @@ void guard(const Context& context, const ColorTarget& target, const std::shared_
         const auto align = [](std::uint32_t extent, std::uint32_t block) { return (static_cast<std::uint64_t>(extent) + block - 1u) / block * block; };
         bytes = align(target.extent.width, blockWidth) * align(target.extent.height, blockHeight) * target.elementBytes * target.samples;
     }
+    std::uint64_t generation = 0;
+    if (GuestMemory::Watched(target.address, static_cast<std::size_t>(bytes))) {
+        static_cast<void>(GuestMemory::CollectWritesUncached(target.address, static_cast<std::size_t>(bytes)));
+        generation = GuestMemory::TrackerGeneration();
+    }
     std::unique_lock lock(guardedMutex());
-    guarded().push_back({context.device, target.address, bytes, target.samples, active});
+    guarded().push_back({context.device, target.address, bytes, target.samples, active, generation});
     anyGuarded().store(true, std::memory_order_release);
     static std::once_flag installed;
     std::call_once(installed, [] {
@@ -532,12 +538,23 @@ void ClearMultisampleTargets(VkDevice device) {
 void RequireNoMultisampleTarget(std::uint64_t address, std::size_t bytes, const char* access) {
     if (bytes == 0 || !anyGuarded().load(std::memory_order_acquire)) return;
     std::shared_lock lock(guardedMutex());
+    bool reused = false;
     for (const auto& range : guarded()) {
         if (address >= range.address + range.bytes || range.address >= address + bytes) continue;
+        if (range.generation != 0 && !GuestMemory::UnchangedSinceCollected(range.address, static_cast<std::size_t>(range.bytes), range.generation)) {
+            range.active->store(false, std::memory_order_release);
+            reused = true;
+            continue;
+        }
         char text[256];
         std::snprintf(text, sizeof(text), "AGC graphics: %s of 0x%llx+0x%zx overlaps multisampled color target 0x%llx+0x%llx (%u samples), whose samples are only on the host: guest access to it is not implemented", access, static_cast<unsigned long long>(address), bytes, static_cast<unsigned long long>(range.address), static_cast<unsigned long long>(range.bytes), range.samples);
         throw std::runtime_error(text);
     }
+    if (!reused) return;
+    lock.unlock();
+    std::unique_lock guardLock(guardedMutex());
+    std::erase_if(guarded(), [](const auto& range) { return !range.active->load(std::memory_order_acquire); });
+    anyGuarded().store(!guarded().empty(), std::memory_order_release);
 }
 
 }
