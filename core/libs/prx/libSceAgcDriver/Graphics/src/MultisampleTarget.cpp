@@ -301,6 +301,7 @@ MultisampleTarget& createFilled(const Context& context, const GuestTextureResour
         case TextureTileMode::kStandard4KB: use.tileMode = ColorTileMode::Standard4KB; break;
         case TextureTileMode::kStandard64KB: use.tileMode = ColorTileMode::Standard64KB; break;
         case TextureTileMode::kR64KBX: use.tileMode = ColorTileMode::RenderTarget; break;
+        case TextureTileMode::kZ64KBX: use.tileMode = ColorTileMode::Z64KBX; break;
         default: refuse("whose tile mode " + std::to_string(static_cast<int>(resource.tileMode)) + " has no modeled multisampled color footprint");
     }
     use.address = resource.baseAddress;
@@ -386,7 +387,7 @@ bool MultisampledCmask::TakeClear() {
 }
 
 std::uint64_t MultisampledColorBytes(const ColorTarget& target) {
-    const auto blockLog2 = target.tileMode == ColorTileMode::Standard4KB ? 12u : target.tileMode == ColorTileMode::Standard64KB || target.tileMode == ColorTileMode::RenderTarget ? 16u : 0u;
+    const auto blockLog2 = target.tileMode == ColorTileMode::Standard4KB ? 12u : target.tileMode == ColorTileMode::Standard64KB || target.tileMode == ColorTileMode::RenderTarget || target.tileMode == ColorTileMode::Z64KBX ? 16u : 0u;
     if (blockLog2 == 0 || !std::has_single_bit(target.elementBytes) || !std::has_single_bit(target.samples)) return 0;
     const auto samplesLog2 = static_cast<std::uint32_t>(std::countr_zero(target.samples));
     const auto elementsLog2 = blockLog2 - static_cast<std::uint32_t>(std::countr_zero(target.elementBytes)) - samplesLog2;
