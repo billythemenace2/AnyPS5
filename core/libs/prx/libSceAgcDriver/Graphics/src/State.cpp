@@ -801,7 +801,8 @@ State DecodeState(const QueueState& queue, bool vertexWorkgroup) {
     Require(!result.depth || result.depth->samples == result.samples, "the depth target's sample count differs from the rasterizer's");
     zero(cx, 0x292, ScanModeMask & ~1u, "scan conversion mode");
     if (result.samples > 1 && (read(cx, 0x292) & 1u) == 0) {
-        Require(!result.depth && !result.alphaToCoverage, "multisampled targets rasterized without MSAA_ENABLE are unsupported with a depth target or alpha-to-coverage");
+        const bool filled = result.topology != VK_PRIMITIVE_TOPOLOGY_POINT_LIST && result.topology != VK_PRIMITIVE_TOPOLOGY_LINE_LIST && result.topology != VK_PRIMITIVE_TOPOLOGY_LINE_STRIP;
+        Require(filled && !result.depth && !result.alphaToCoverage, "multisampled targets rasterized without MSAA_ENABLE are unsupported for points, lines, a depth target or alpha-to-coverage");
         result.customSampleLocations = true;
         result.sampleLocations.fill(0);
     }
