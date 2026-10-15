@@ -2940,6 +2940,11 @@ void multisampleTests() {
     Require(MultisampledColorBytes(narrow) == 0x50000, "an 8x 4-byte target is not 32x64 pixels per 64 KiB block");
     srgb.extent = {100, 100};
     Require(MultisampledColorBytes(srgb) == 0x40000, "a 4x 100x100 4-byte target does not span 2x2 64 KiB blocks");
+    srgb.tileMode = ColorTileMode::Z64KBX;
+    Require(MultisampledColorBytes(srgb) == 0x40000, "a 4x 100x100 4-byte Z64KBX target does not span 2x2 64 KiB blocks");
+    narrow.tileMode = ColorTileMode::Z64KBX;
+    narrow.samples = 2;
+    Require(MultisampledColorBytes(narrow) == 0x30000, "a 2x 4-byte Z64KBX target is not 64x128 pixels per 64 KiB block");
     srgb.tileMode = ColorTileMode::Standard4KB;
     Require(MultisampledColorBytes(srgb) == 0x31000, "a 4x 4-byte target is not 16x16 pixels per 4 KiB block");
     srgb.tileMode = ColorTileMode::Linear;
