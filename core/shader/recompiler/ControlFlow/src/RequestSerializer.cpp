@@ -803,8 +803,7 @@ std::string RequestSerializer::Serialize(const RecompileRequest& request) const 
     writer.WriteBool(request.target.vertexSubgroups);
     writer.WriteBool(request.target.float16DenormPreserve);
     writer.WriteU32Span(request.context.linkedCallFallbacks);
-    writer.WriteBool(request.target.spannedWaves);
-    writer.WriteBool(request.target.meshAsCompute);
+    writer.WriteU8(static_cast<std::uint8_t>((request.target.spannedWaves ? 1u : 0u) | (request.target.meshAsCompute ? 2u : 0u)));
     return base64Encode(buffer);
 }
 
@@ -849,8 +848,12 @@ DeserializedRequest RequestSerializer::Deserialize(std::string_view text) const 
         result.linkedCallFallbacks = reader.ReadU32Vector();
         result.request.context.linkedCallFallbacks = result.linkedCallFallbacks;
     }
-    if (version >= 32u) result.request.target.spannedWaves = reader.ReadBool();
-    if (version >= 33u) result.request.target.meshAsCompute = reader.ReadBool();
+    if (version >= 32u) {
+        const auto flags = reader.ReadU8();
+        if (flags > (version >= 33u ? 3u : 1u)) throw std::runtime_error("RequestSerializer: invalid spanned wave or mesh compute flags");
+        result.request.target.spannedWaves = (flags & 1u) != 0u;
+        result.request.target.meshAsCompute = (flags & 2u) != 0u;
+    }
     if (version >= 21u && reader.Remaining() != 0u) throw std::runtime_error("RequestSerializer: unexpected trailing data");
     return result;
 }
