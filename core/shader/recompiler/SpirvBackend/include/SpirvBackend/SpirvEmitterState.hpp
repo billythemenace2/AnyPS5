@@ -88,7 +88,7 @@ struct SpirvTableAccess {
 struct SpirvEmitterState {
     const ImageResource* runtimeImage = nullptr;
     SpirvTableAccess tableAccess;
-    SpirvEmitterState(const IrProgram& program, const ShaderStageInputInfo& inputInfo);
+    SpirvEmitterState(const IrProgram& program, const ShaderStageInputInfo& inputInfo, bool meshAsCompute = false);
 
     SpirvModule module;
     const IrProgram& program;

@@ -728,8 +728,8 @@ void DefineMeshOutputs(SpirvEmitterState& state) {
             const bool shared = output.kind == StageOutputKind::Layer;
             output.meshDataVariable = MeshArray(state, shared ? spv::StorageClassWorkgroup : spv::StorageClassPrivate, MeshOutputType(state, output.kind), shared ? mesh.maxVertices : state.laneCount);
         }
-        if (std::ranges::count_if(state.outputs, [](const SpirvOutputBinding& output) { return output.kind == StageOutputKind::Position; }) != 1) {
-            throw std::runtime_error("a mesh program run as compute must export one position");
+        if (std::ranges::count_if(state.outputs, [](const SpirvOutputBinding& output) { return output.kind == StageOutputKind::Position; }) > 1) {
+            throw std::runtime_error("a mesh program run as compute exports more than one position");
         }
         state.meshAllocation = MeshArray(state, spv::StorageClassWorkgroup, TypeU32(state), 2u);
         state.meshPrimitiveData = MeshArray(state, spv::StorageClassPrivate, TypeU32(state), state.laneCount);
@@ -1387,12 +1387,12 @@ void EmitMeshBufferOutputs(SpirvEmitterState& state, std::uint32_t vertices, std
     const auto triangles = add64(output, BdaConstant(state, MeshOutputHeaderBytes));
     const auto corners = mesh.outputPrimitiveSize;
     const auto records = add64(triangles, mul64(total, 4ull * corners * mesh.maxPrimitives));
-    std::vector<const SpirvOutputBinding*> layout;
+    std::vector<const SpirvOutputBinding*> layout{nullptr};
     std::uint32_t clipDistances = 0;
     std::uint32_t cullDistances = 0;
     const SpirvOutputBinding* layer = nullptr;
     for (const auto& binding : state.outputs) {
-        if (binding.kind == StageOutputKind::Position) layout.insert(layout.begin(), &binding);
+        if (binding.kind == StageOutputKind::Position) layout.front() = &binding;
         else if (binding.kind == StageOutputKind::Parameter) layout.push_back(&binding);
         else if (binding.kind == StageOutputKind::ClipDistance) clipDistances = std::max(clipDistances, binding.index + 1u);
         else if (binding.kind == StageOutputKind::CullDistance) cullDistances = std::max(cullDistances, binding.index + 1u);
@@ -1418,7 +1418,7 @@ void EmitMeshBufferOutputs(SpirvEmitterState& state, std::uint32_t vertices, std
         EmitIfCondition(state, Binary(state, spv::OpULessThan, TypeBool(state), index, vertices), [&]() {
             const auto record = add64(records, mul64(EmitBinaryU32(state, spv::OpIAdd, firstVertex, index), recordBytes));
             for (std::uint32_t slot = 0; slot < layout.size(); slot++) {
-                const auto value = MeshLoad(state, layout.at(slot)->meshDataVariable, spv::StorageClassPrivate, TypeF32Vector(state, 4u), ConstantU32(state, half));
+                const auto value = layout.at(slot) != nullptr ? MeshLoad(state, layout.at(slot)->meshDataVariable, spv::StorageClassPrivate, TypeF32Vector(state, 4u), ConstantU32(state, half)) : state.module.Constant(spv::OpConstantComposite, TypeF32Vector(state, 4u), ConstantF32(state, 0u), ConstantF32(state, 0u), ConstantF32(state, 0u), ConstantF32(state, 0u));
                 store(add64(record, BdaConstant(state, 16ull * slot)), TypeF32Vector(state, 4u), value);
             }
             const auto extras = MeshRecordExtraOffset(parameters);

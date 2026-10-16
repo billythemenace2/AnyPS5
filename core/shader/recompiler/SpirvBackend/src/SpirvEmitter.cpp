@@ -69,7 +69,7 @@ std::uint32_t WaveLdsScope(const IrProgram& program, const ShaderWorkgroupInputI
 
 }
 
-SpirvEmitterState::SpirvEmitterState(const IrProgram& program, const ShaderStageInputInfo& inputInfo) : module(program.Resources().stage == IrShaderStage::Mesh ? 0x00010400u : 0x00010300u), program(program), inputInfo(inputInfo), requirements(AnalyzeProgramRequirements(program)) {
+SpirvEmitterState::SpirvEmitterState(const IrProgram& program, const ShaderStageInputInfo& inputInfo, bool meshAsCompute) : module(program.Resources().stage == IrShaderStage::Mesh && !meshAsCompute ? 0x00010400u : 0x00010300u), program(program), inputInfo(inputInfo), requirements(AnalyzeProgramRequirements(program)) {
 }
 
 SpirvValueEmitContext::SpirvValueEmitContext(SpirvEmitterState& state) : state(state) {
@@ -249,7 +249,7 @@ std::vector<std::uint32_t> SpirvEmitter::Emit(const IrProgram& program, const Sh
     }
     ValidateProgram(program, true);
     ValidateBdaTarget(program, target);
-    SpirvEmitterState state(program, inputInfo);
+    SpirvEmitterState state(program, inputInfo, target.meshAsCompute);
     state.module.RequireVersion(target.spirvVersion);
     state.spirvVersion = target.spirvVersion;
     state.supportedCapabilities = target.supportedCapabilities;

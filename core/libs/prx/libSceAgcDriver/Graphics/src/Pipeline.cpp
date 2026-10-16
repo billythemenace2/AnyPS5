@@ -352,11 +352,15 @@ Pipeline::Pipeline(const Context& context, const State& state, const VertexInput
             stages[i].pSpecializationInfo = specializations.back().Info();
         }
         std::optional<VkPipelineShaderStageCreateInfo> computeStage;
+        VkPipelineShaderStageRequiredSubgroupSizeCreateInfoEXT computeSubgroup{VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_REQUIRED_SUBGROUP_SIZE_CREATE_INFO_EXT};
         if (const auto compute = std::ranges::find(shaders, ShaderRecompiler::ShaderStage::Compute, &CompiledShader::stage); compute != shaders.end()) {
             Require(meshCompute, "a compute stage in a graphics pipeline runs only a mesh program");
             const auto index = compute - shaders.begin();
             computeStage = stages[index];
             stages.erase(stages.begin() + index);
+            const auto subgroupSize = shaders[index].program->hostSubgroupSize;
+            if (context.computeWave32 && (subgroupSize == 32u || subgroupSize > context.maxComputeSubgroupSize)) computeSubgroup.requiredSubgroupSize = std::min(subgroupSize, context.maxComputeSubgroupSize);
+            if (computeSubgroup.requiredSubgroupSize != 0u) computeStage->pNext = &computeSubgroup;
         }
         if (std::ranges::any_of(shaders, [](const CompiledShader& shader) { return shader.program != nullptr && !shader.program->stencilReferences.empty(); })) {
             for (std::size_t i = 0; i < shaders.size(); ++i) {
