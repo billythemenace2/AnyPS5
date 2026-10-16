@@ -212,7 +212,7 @@ void Run(AgcDriver::VulkanDevice& device, const AgcDriver::Graphics::ColorTarget
     state.blend.colorWriteMask = 15;
     state.blends = {state.blend};
     state.blendConstants = {};
-    if (mesh) {
+    if (mesh && !target.meshAsCompute) {
         Require(DeclaresLayer(geometryResult.spirv), "the mesh program declares no Layer output");
         VkPhysicalDeviceSubgroupProperties subgroup{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES};
         subgroup.subgroupSize = target.subgroupSize;
@@ -284,7 +284,12 @@ int main(int argc, char** argv) {
         Run(*device, fieldColor, false, LayerFieldPixelCode, true);
         Check(fieldVolume.Data(), fieldColor, "a pixel shader reading the render target index of its packed ancillary word", LayerFieldBands);
         if (vertexOnly) std::puts("layered volume vertex draw tests passed");
-        else if (target.mesh.has_value()) Run(*device, color, true, PixelCode, false);
+        else if (target.meshAsCompute) {
+            const GuestVolume meshVolume((VolumeTarget(nullptr).bytes + 65535u) & ~std::size_t{65535u});
+            const auto meshColor = VolumeTarget(meshVolume.Data());
+            Run(*device, meshColor, true, PixelCode, false);
+            Check(meshVolume.Data(), meshColor, "mesh draw run as compute", WhiteBands);
+        } else if (target.mesh.has_value()) Run(*device, color, true, PixelCode, false);
         else std::puts("mesh case skipped, the device has no VK_EXT_mesh_shader");
         std::puts("layered volume draw tests passed");
         return 0;
