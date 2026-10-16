@@ -7198,6 +7198,7 @@ void meshArgumentTests() {
     using AgcDriver::Graphics::MeshArguments;
     using AgcDriver::Graphics::ResolveMeshArguments;
     AgcDriver::Graphics::Context context{};
+    context.meshShader = true;
     context.meshLimits.maxMeshWorkGroupCount[0] = 1000;
     context.meshLimits.maxMeshWorkGroupCount[1] = 600;
     context.meshLimits.maxMeshWorkGroupTotalCount = 4000;

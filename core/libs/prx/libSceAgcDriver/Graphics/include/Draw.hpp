@@ -40,6 +40,9 @@ InPlaceIndices InPlaceIndexRange(Recorder& recorder, std::uint64_t address, std:
 
 std::array<std::uint32_t, 4> MeshIndexBufferDescriptor(const Pm4::DrawParameters& draw);
 
+inline constexpr std::uint32_t MeshComputeIndirectInstances = 4;
+std::vector<CompiledShader> MeshComputeStages(const Context& context, const State& state, std::span<const CompiledShader> shaders);
+
 struct MeshArguments {
     std::uint32_t groups;
     std::uint32_t instances;

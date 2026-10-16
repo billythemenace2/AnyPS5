@@ -503,6 +503,7 @@ void encodeArtifact(Writer& writer, const CompiledShaderArtifact& result) {
     writer.Values(std::span<const std::uint32_t>(result.stencilReferences));
     writer.Value(result.stencilReplaySafe);
     writer.Value(result.stencilReferenceDword);
+    writer.Value(result.meshRecordLayout);
 }
 
 void decodeArtifact(Reader& reader, CompiledShaderArtifact& result) {
@@ -550,6 +551,7 @@ void decodeArtifact(Reader& reader, CompiledShaderArtifact& result) {
     reader.Values(result.stencilReferences);
     reader.Value(result.stencilReplaySafe);
     reader.Value(result.stencilReferenceDword);
+    reader.Value(result.meshRecordLayout);
     result.variantId = 0;
 }
 
