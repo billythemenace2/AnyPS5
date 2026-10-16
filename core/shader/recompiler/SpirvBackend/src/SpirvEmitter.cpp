@@ -261,6 +261,7 @@ std::vector<std::uint32_t> SpirvEmitter::Emit(const IrProgram& program, const Sh
     state.fragmentDescriptorSet = target.fragmentDescriptorSet;
     state.float16DenormPreserve = target.float16DenormPreserve;
     state.robustBufferAccess2 = target.robustBufferAccess2;
+    state.meshAsCompute = target.meshAsCompute && program.Resources().stage == IrShaderStage::Mesh;
     state.hostSubgroupSize = target.subgroupSize;
     if (state.requirements.ldsLock && LdsInDeviceMemory(state) && std::find(target.supportedCapabilities.begin(), target.supportedCapabilities.end(), static_cast<std::uint32_t>(spv::CapabilityInt64Atomics)) != target.supportedCapabilities.end()) {
         state.requirements.ldsLock = false;
@@ -297,7 +298,7 @@ std::vector<std::uint32_t> SpirvEmitter::Emit(const IrProgram& program, const Sh
     state.bdaStopsInvocations = state.waveLdsScope == 0 && !state.spannedWave && BdaInvocationsMayStop(program) && program.Resources().stage != IrShaderStage::Mesh;
     EmitModuleHeader(state, bindings);
     EmitProgram(state);
-    state.module.EmitEntryPoint(ExecutionModelForStage(state.program.Resources().stage), state.mainFunc, "main", state.interfaceVariables);
+    state.module.EmitEntryPoint(state.meshAsCompute ? spv::ExecutionModelGLCompute : ExecutionModelForStage(state.program.Resources().stage), state.mainFunc, "main", state.interfaceVariables);
     if (info != nullptr) info->fullSubgroups = state.spannedWave;
     return state.module.Finalize();
 }
