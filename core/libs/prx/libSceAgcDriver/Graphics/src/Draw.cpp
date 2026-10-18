@@ -808,11 +808,30 @@ std::array<std::uint32_t, 4> MeshIndexBufferDescriptor(const Pm4::DrawParameters
     return {static_cast<std::uint32_t>(address), static_cast<std::uint32_t>(address >> 32u) & 0xffffu, static_cast<std::uint32_t>(bytes), RawWord3};
 }
 
+std::uint32_t MeshDrawLayers(const State& state) {
+    std::uint32_t layers = 1;
+    for (const auto& color : state.colors) layers = std::max({layers, color.layers, color.depth});
+    if (state.depth.has_value() && state.depth->lastSlice >= state.depth->firstSlice) layers = std::max(layers, state.depth->lastSlice - state.depth->firstSlice + 1u);
+    return layers;
+}
+
+bool MeshDrawRunsAsCompute(bool meshShader, std::uint32_t maxMeshOutputLayers, const State& state) {
+    return state.stages.mesh.has_value() && (!meshShader || MeshDrawLayers(state) > maxMeshOutputLayers);
+}
+
+bool MeshDrawRunsAsCompute(const Context& context, const State& state) {
+    return MeshDrawRunsAsCompute(context.meshShader, context.meshLimits.maxMeshOutputLayers, state);
+}
+
 MeshArgumentRules MeshArgumentRulesFor(const Context& context, const ShaderRecompiler::MeshConfiguration& mesh, std::uint32_t indexCount) {
+    return MeshArgumentRulesFor(context, mesh, indexCount, !context.meshShader);
+}
+
+MeshArgumentRules MeshArgumentRulesFor(const Context& context, const ShaderRecompiler::MeshConfiguration& mesh, std::uint32_t indexCount, bool asCompute) {
     const auto inputSize = mesh.inputPrimitive == 1 ? 1u : mesh.inputPrimitive == 2 ? 2u : 3u;
     const auto step = mesh.inputPrimitive == 5 || mesh.inputPrimitive == 6 ? 1u : inputSize;
     Require(mesh.primitivesPerGroup != 0, "mesh draw contains no complete primitive");
-    if (!context.meshShader) {
+    if (asCompute) {
         const auto indexGroups = indexCount >= inputSize ? (indexCount - inputSize) / step / mesh.primitivesPerGroup + 1u : 0u;
         return {indexCount, inputSize, step, mesh.primitivesPerGroup, context.limits.maxComputeWorkGroupCount[0], context.limits.maxComputeWorkGroupCount[1], indexGroups * MeshComputeIndirectInstances};
     }
@@ -821,11 +840,12 @@ MeshArgumentRules MeshArgumentRulesFor(const Context& context, const ShaderRecom
 
 std::vector<CompiledShader> MeshComputeStages(const Context& context, const State& state, std::span<const CompiledShader> shaders) {
     using Stage = ShaderRecompiler::ShaderStage;
-    if (!state.stages.mesh || context.meshShader || shaders.empty() || shaders.front().stage != Stage::Mesh) return {};
+    if (!MeshDrawRunsAsCompute(context, state) || shaders.empty() || shaders.front().stage != Stage::Mesh) return {};
     Require(shaders.size() == 2u && shaders.front().program != nullptr && shaders.front().program->variantId != 0, "a mesh program run as compute needs one fragment stage and a variant id");
     static std::mutex mutex;
     static std::map<std::uint64_t, std::unique_ptr<const ShaderRecompiler::RecompileResult>> readbacks;
     const auto& mesh = *shaders.front().program;
+    Require(mesh.meshRecordLayout != 0, "a mesh-path draw run as compute has a mesh program compiled for the mesh stage");
     const ShaderRecompiler::RecompileResult* readback = nullptr;
     {
         std::lock_guard lock(mutex);
@@ -1109,7 +1129,7 @@ DrawInputs prepareDrawInputs(const Context& context, const State& state, const P
             const auto primitives = (draw.indexCount - inputSize) / step + 1u;
             inputs.meshGroups = (primitives - 1u) / mesh.primitivesPerGroup + 1u;
             APS5_LOG_OUT_DEBUG("Mesh primitives=%u groups=%u", primitives, inputs.meshGroups);
-            if (context.meshShader) Require(inputs.meshGroups <= context.meshLimits.maxMeshWorkGroupCount[0] && draw.instanceCount <= context.meshLimits.maxMeshWorkGroupCount[1] && static_cast<std::uint64_t>(inputs.meshGroups) * draw.instanceCount <= context.meshLimits.maxMeshWorkGroupTotalCount, "mesh draw exceeds workgroup count limits");
+            if (!MeshDrawRunsAsCompute(context, state)) Require(inputs.meshGroups <= context.meshLimits.maxMeshWorkGroupCount[0] && draw.instanceCount <= context.meshLimits.maxMeshWorkGroupCount[1] && static_cast<std::uint64_t>(inputs.meshGroups) * draw.instanceCount <= context.meshLimits.maxMeshWorkGroupTotalCount, "mesh draw exceeds workgroup count limits");
             else Require(inputs.meshGroups <= context.limits.maxComputeWorkGroupCount[0] && draw.instanceCount <= context.limits.maxComputeWorkGroupCount[1], "mesh draw run as compute exceeds workgroup count limits");
         }
     }
@@ -1390,7 +1410,7 @@ struct IndirectRecord {
 void recordDrawCommands(const Context& context, VkCommandBuffer commands, const State& state, const Pm4::DrawParameters& draw, const DrawInputs& inputs, const IndirectRecord* indirect, VkBuffer argumentBuffer, VkDeviceSize argumentOffset, std::uint32_t firstIndex = 0) {
     if (context.recorder != nullptr) context.recorder->NoteSampledDraw(commands);
     const auto* args = indirect != nullptr ? indirect->args : nullptr;
-    if (state.stages.mesh && !context.meshShader) {
+    if (MeshDrawRunsAsCompute(context, state)) {
         context.Function<PFN_vkCmdDrawIndirect>("vkCmdDrawIndirect")(commands, argumentBuffer, argumentOffset, 1, sizeof(VkDrawIndirectCommand));
         return;
     }
@@ -1502,7 +1522,7 @@ std::shared_ptr<Buffer> directMeshArguments(const Context& context, const Pm4::D
 
 std::shared_ptr<Buffer> recordMeshArguments(const Context& context, VkCommandBuffer commands, Recorder* recorder, bool recorded, const State& state, const Pm4::DrawParameters& draw, const IndirectRecord& indirect, const std::function<void(std::uint32_t)>& countBarrier, std::span<const std::uint32_t> restartTable) {
     const auto* args = indirect.args;
-    const auto rules = MeshArgumentRulesFor(context, *state.stages.mesh, draw.indexCount);
+    const auto rules = MeshArgumentRulesFor(context, *state.stages.mesh, draw.indexCount, MeshDrawRunsAsCompute(context, state));
     auto arguments = meshArgumentBuffer(context, restartTable);
     if (indirect.path == IndirectDrawPath::Gpu && recorder != nullptr && indirect.argumentImport->address != 0) {
         const std::array<std::uint32_t, 7> words{rules.indexCount, rules.inputSize, rules.step, rules.primitivesPerGroup, rules.maxGroups, rules.maxInstances, rules.maxTotal};
@@ -1700,7 +1720,7 @@ std::shared_ptr<Buffer> recordMeshCompute(const Context& context, VkCommandBuffe
     const auto& program = *shaders.front().program;
     const auto recordBytes = static_cast<std::uint64_t>(ShaderRecompiler::MeshRecordBytes(static_cast<std::uint32_t>(program.parameterExports.size()), program.meshRecordLayout));
     const auto groupBytes = 4ull * mesh.outputPrimitiveSize * mesh.maxPrimitives + recordBytes * mesh.maxVertices;
-    const auto groups = indirect ? static_cast<std::uint64_t>(MeshArgumentRulesFor(context, mesh, draw.indexCount).maxTotal) : static_cast<std::uint64_t>(inputs.meshGroups) * draw.instanceCount;
+    const auto groups = indirect ? static_cast<std::uint64_t>(MeshArgumentRulesFor(context, mesh, draw.indexCount, true).maxTotal) : static_cast<std::uint64_t>(inputs.meshGroups) * draw.instanceCount;
     auto output = std::make_shared<Buffer>(context, static_cast<std::size_t>(ShaderRecompiler::MeshOutputHeaderBytes + std::max<std::uint64_t>(groups, 1u) * groupBytes), VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
     const auto address = output->DeviceAddress();
     std::memcpy(arguments.Bytes().data() + ShaderRecompiler::MeshOutputAddressDword * 4u, &address, sizeof(address));
@@ -1833,7 +1853,7 @@ void recordDraw(const Context& context, const State& state, const Pm4::DrawParam
     const auto drawBindings = resources.PrepareDrawBindings(*recorder, record.moved);
     const bool capture = CaptureInputsEnabled();
     const bool meshIndirect = state.stages.mesh && args != nullptr;
-    const bool meshCompute = state.stages.mesh && !context.meshShader;
+    const bool meshCompute = MeshDrawRunsAsCompute(context, state);
     const bool addressBased = resources.HoldsLease();
     auto passReads = addressBased ? std::vector<std::pair<std::uint64_t, std::uint64_t>>{} : resources.DeviceReads();
     if (gpuIndirect) {
@@ -2477,7 +2497,7 @@ void Draw(const Context& context, const State& state, const Pm4::DrawParameters&
     }
     std::shared_ptr<Buffer> meshArguments;
     std::shared_ptr<Buffer> meshOutput;
-    const bool meshCompute = state.stages.mesh && !context.meshShader;
+    const bool meshCompute = MeshDrawRunsAsCompute(context, state);
     if (state.stages.mesh && args != nullptr) {
         meshArguments = recordMeshArguments(context, commands, recorder, recorded, state, draw, indirect, countBarrier, inputs.restartTable);
         argumentBuffer = meshArguments->Handle();
