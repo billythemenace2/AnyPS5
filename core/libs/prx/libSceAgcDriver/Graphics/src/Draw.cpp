@@ -846,6 +846,9 @@ std::vector<CompiledShader> MeshComputeStages(const Context& context, const Stat
     static std::map<std::uint64_t, std::unique_ptr<const ShaderRecompiler::RecompileResult>> readbacks;
     const auto& mesh = *shaders.front().program;
     Require(mesh.meshRecordLayout != 0, "a mesh-path draw run as compute has a mesh program compiled for the mesh stage");
+    const auto host = mesh.hostSubgroupSize;
+    const auto lanes = context.computeWave32 && (host == 32u || host > context.maxComputeSubgroupSize) ? std::min(host, context.maxComputeSubgroupSize) : context.subgroup.subgroupSize;
+    Require(lanes >= state.stages.vertexWaveSize, "a mesh-path draw run as compute needs compute subgroups at least as wide as its wave");
     const ShaderRecompiler::RecompileResult* readback = nullptr;
     {
         std::lock_guard lock(mutex);
